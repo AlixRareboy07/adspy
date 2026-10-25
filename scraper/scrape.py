@@ -227,6 +227,10 @@ def process_domain(page, d: dict) -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--domain", help="only this domain")
+    ap.add_argument("--pending", action="store_true",
+                    help="only brand-new domains that were never scraped (and have no error yet)")
+    ap.add_argument("--count", action="store_true",
+                    help="with --pending: just print how many are waiting (writes pending=N to GITHUB_OUTPUT)")
     args = ap.parse_args()
 
     if not db.URL or not db.KEY:
@@ -236,7 +240,17 @@ def main() -> int:
     params = {"is_active": "eq.true", "select": "*"}
     if args.domain:
         params["domain"] = f"eq.{normalize_domain(args.domain)}"
+    if args.pending:
+        params["last_scraped_at"] = "is.null"
+        params["last_error"] = "is.null"
     domains = db.select("domains", params)
+    if args.count:
+        print(len(domains))
+        out = os.environ.get("GITHUB_OUTPUT")
+        if out:
+            with open(out, "a") as f:
+                f.write(f"pending={len(domains)}\n")
+        return 0
     if not domains:
         log("No active domains to track. Add some in the web app.")
         return 0
