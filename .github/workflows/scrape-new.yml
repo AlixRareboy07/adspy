@@ -34,7 +34,12 @@ jobs:
         if: steps.check.outputs.pending != '0' || steps.check.outputs.research != '0'
         run: |
           pip install -q -r scraper/requirements.txt
-          python -m playwright install --with-deps chromium
+          # the apt mirror sometimes hangs: give each attempt 4 minutes, try up to 3 times
+          for i in 1 2 3; do
+            timeout 240 python -m playwright install --with-deps chromium && break
+            echo "install attempt $i failed or timed out, retrying"; sleep 5
+          done
+          python -m playwright install chromium
       - name: Scrape new domains
         if: steps.check.outputs.pending != '0'
         working-directory: scraper
