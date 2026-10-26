@@ -43,9 +43,9 @@ def url_for_page(page_id: str) -> str:
             f"&country={COUNTRY}&media_type=all&search_type=page&view_all_page_id={page_id}")
 
 
-def url_for_keyword(q: str) -> str:
+def url_for_keyword(q: str, country: str | None = None) -> str:
     return ("https://www.facebook.com/ads/library/?active_status=all&ad_type=all"
-            f"&country={COUNTRY}&media_type=all&search_type=keyword_unordered&q={quote(q)}")
+            f"&country={country or COUNTRY}&media_type=all&search_type=keyword_unordered&q={quote(q)}")
 
 
 # ------------------------------------------------------------- browser logic
