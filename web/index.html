@@ -56,6 +56,12 @@
   .chip.own{border-color:var(--ok)} .chip button{background:none;border:0;color:var(--mute);cursor:pointer;font-size:18px;line-height:1}
   .b-own{background:#12351f;color:var(--ok)} .b-comp{background:#2a2438;color:#b07cff}
   tr.sec td{background:var(--panel2);font-weight:700}
+  textarea{width:100%;min-height:96px;resize:vertical}
+  .kwchip{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:2px 10px;margin:0 6px 4px 0;font-size:12px}
+  .job{margin-bottom:14px} .job summary{cursor:pointer;list-style:none;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .job summary::-webkit-details-marker{display:none}
+  .kwrow{font-size:12px;color:#cfd3de;white-space:nowrap}
+  input.dom{width:170px}
   @media(max-width:700px){.copy{max-width:220px} main{padding:10px}}
 </style>
 </head>
@@ -81,6 +87,7 @@
       <button data-tab="ads" class="on">Ads</button>
       <button data-tab="compare">Compare</button>
       <button data-tab="report">Daily report</button>
+      <button data-tab="research">Deep research</button>
       <button data-tab="domains">Domains</button>
     </nav>
     <span class="mute small" id="who"></span>
@@ -93,6 +100,7 @@
       <div class="stats" id="adStats"></div>
       <div class="card row">
         <select id="fDomain"><option value="">All domains</option></select>
+        <select id="fCountry"><option value="">All countries</option></select>
         <select id="fKind"><option value="">My store + competitors</option><option value="own">My store only</option><option value="competitor">Competitors only</option></select>
         <select id="fStatus">
           <option value="">Active + stopped</option><option value="active">Active only</option><option value="inactive">Stopped only</option>
@@ -123,6 +131,7 @@
 
     <!-- COMPARE TAB -->
     <section id="tab-compare" class="hide">
+      <div class="card row"><span class="mute small">Compare my store against competitors from:</span><select id="cCountry"><option value="">All countries</option></select></div>
       <div id="cmpSummary" class="stats"></div>
       <div class="card" style="padding:0;overflow:auto">
         <table>
@@ -149,11 +158,27 @@
       <p class="mute small">One snapshot is saved per domain per day (the latest scrape of the day wins). History starts from the day you added the domain.</p>
     </section>
 
+    <!-- RESEARCH TAB -->
+    <section id="tab-research" class="hide">
+      <form id="resForm" class="card">
+        <p style="margin-top:0"><b>Find stores that run ads for your keywords.</b> Type one keyword (or phrase) per line - you can add several at once. The Meta Ad Library is searched in the country you pick, and you get a list of every store with its number of ads per keyword.</p>
+        <textarea id="resKeywords" placeholder="toilet shower&#10;bidet sprayer&#10;bathroom accessories"></textarea>
+        <div class="row" style="margin-top:10px">
+          <select id="resCountry"></select>
+          <span class="mute small grow" id="resSuggest"></span>
+          <button class="btn pri" type="submit">Start research</button>
+        </div>
+      </form>
+      <p class="mute small">Research starts automatically within about 10 minutes and takes a few minutes per keyword. Tick the stores you want and press Approve: they move to Domains under Competitors, with the country of this research.</p>
+      <div id="resJobs"></div>
+    </section>
+
     <!-- DOMAINS TAB -->
     <section id="tab-domains" class="hide">
       <form id="addForm" class="card">
         <div class="row">
           <select id="dKind"><option value="competitor">Competitor</option><option value="own">My store</option></select>
+          <select id="dCountry" title="Country"></select>
           <input id="dName" class="grow" placeholder="Domain(s), e.g. competitor.com (paste several, separated by comma or space)">
           <input id="dPage" class="grow" placeholder="(optional) Facebook Page ID">
           <button type="button" class="btn" id="stageBtn">+ Add to list</button>
@@ -164,7 +189,7 @@
       <p class="mute small">The scraper finds the Facebook page automatically from the website. If it cannot, paste the Page ID above (Facebook page → About → Page transparency → Page ID). New domains start being scraped automatically within about 10 minutes of pressing Start tracking.</p>
       <div class="card" style="padding:0;overflow:auto">
         <table>
-          <thead><tr><th>Domain</th><th>Facebook page(s)</th><th>Ads</th><th>Last scraped</th><th>Tracking</th><th></th></tr></thead>
+          <thead><tr><th>Domain</th><th>Country</th><th>Facebook page(s)</th><th>Ads</th><th>Last scraped</th><th>Tracking</th><th></th></tr></thead>
           <tbody id="domRows"></tbody>
         </table>
       </div>
@@ -188,6 +213,21 @@ const safeUrl = u => /^https?:\/\//i.test(u || "") ? u : "";
 const fmtDate = d => d ? new Date(d + (d.length === 10 ? "T00:00:00" : "")).toLocaleDateString(undefined,{day:"2-digit",month:"short",year:"numeric"}) : "—";
 const toast = (m) => { const t = $("#toast"); t.textContent = m; t.style.display = "block"; setTimeout(() => t.style.display = "none", 3500); };
 
+const COUNTRIES = { PK: "Pakistan", IN: "India", AE: "United Arab Emirates", BD: "Bangladesh", LK: "Sri Lanka", NP: "Nepal", SA: "Saudi Arabia", QA: "Qatar", KW: "Kuwait", OM: "Oman", BH: "Bahrain", GB: "United Kingdom", US: "United States", CA: "Canada", AU: "Australia", NZ: "New Zealand", MY: "Malaysia", SG: "Singapore", ID: "Indonesia", PH: "Philippines", TR: "Turkey", EG: "Egypt", ZA: "South Africa", NG: "Nigeria", KE: "Kenya", DE: "Germany", FR: "France", IT: "Italy", ES: "Spain", NL: "Netherlands" };
+const cname = c => COUNTRIES[c] || c || "Unknown";
+const flag = c => /^[A-Z]{2}$/.test(c || "") ? String.fromCodePoint(...[...c].map(ch => 127397 + ch.charCodeAt(0))) : "🌐";
+const countryOpts = (sel, blank) => `<option value="">${blank}</option>` + Object.entries(COUNTRIES).map(([k, v]) => `<option value="${k}" ${k === sel ? "selected" : ""}>${flag(k)} ${v}</option>`).join("");
+const countrySelect = x => `<select data-act="country" data-id="${x.id}">${countryOpts(x.country, "— not set —")}</select>${x.country_source === "auto" ? '<br><span class="mute small">auto-detected</span>' : ""}`;
+function fillCountryFilters() {
+  const used = [...new Set(domains.map(d => d.country).filter(Boolean))].sort((a, b) => cname(a).localeCompare(cname(b)));
+  for (const sel of ["#fCountry", "#cCountry"]) {
+    const cur = $(sel).value;
+    $(sel).innerHTML = '<option value="">All countries</option>' + used.map(c => `<option value="${c}">${flag(c)} ${cname(c)}</option>`).join("");
+    $(sel).value = cur;
+  }
+}
+$("#dCountry").innerHTML = countryOpts("", "Country: auto-detect");
+$("#cCountry").onchange = () => loadCompare();
 let domains = [], adsCache = [], page = 0, PAGE = 200, chart = null, pollTimer = null;
 
 /* ---------- auth ---------- */
@@ -214,10 +254,11 @@ $("#logout").onclick = async () => { started = false; await sb.auth.signOut(); }
 /* ---------- tabs ---------- */
 document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
   document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
-  ["ads","compare","report","domains"].forEach(t => $("#tab-" + t).classList.toggle("hide", t !== b.dataset.tab));
+  ["ads","compare","report","research","domains"].forEach(t => $("#tab-" + t).classList.toggle("hide", t !== b.dataset.tab));
   if (b.dataset.tab === "report") loadReport();
   if (b.dataset.tab === "compare") loadCompare();
   if (b.dataset.tab === "domains") loadDomains();
+  if (b.dataset.tab === "research") loadResearch();
 });
 
 /* ---------- domains ---------- */
@@ -239,6 +280,7 @@ async function loadDomains() {
       : '<span class="mute">not found yet</span>';
     return `<tr>
       <td><b>${esc(x.domain)}</b>${x.fb_page_url ? `<br><a class="small" target="_blank" rel="noopener" href="${esc(safeUrl(x.fb_page_url))}">facebook page</a>` : ""}</td>
+      <td>${countrySelect(x)}</td>
       <td>${pageLinks}</td>
       <td><b>${c.a}</b> active<br><span class="mute small">${c.t} total</span></td>
       <td>${x.last_scraped_at ? fmtDate(x.last_scraped_at) : '<span class="mute">pending</span>'}
@@ -246,8 +288,13 @@ async function loadDomains() {
       <td><label><input type="checkbox" data-act="toggle" data-id="${x.id}" ${x.is_active ? "checked" : ""}> on</label></td>
       <td><button class="btn danger small" data-act="del" data-id="${x.id}">Delete</button></td></tr>`;
   };
-  const sec = (label, list) => list.length ? `<tr class="sec"><td colspan="6">${label} (${list.length})</td></tr>` + list.map(rowFn).join("") : "";
-  $("#domRows").innerHTML = sec("🏪 My store", domains.filter(x => x.kind === "own")) + sec("🎯 Competitors", domains.filter(x => x.kind !== "own")) || '<tr><td colspan="6" class="mute">No domains yet. Add your store and your competitors above.</td></tr>';
+  const sec = (label, list) => list.length ? `<tr class="sec"><td colspan="7">${label} (${list.length})</td></tr>` + list.map(rowFn).join("") : "";
+  const comps = domains.filter(x => x.kind !== "own");
+  const codes = [...new Set(comps.map(x => x.country || ""))].sort((a, b) => (a === "") - (b === "") || a.localeCompare(b));
+  $("#domRows").innerHTML = sec("🏪 My store", domains.filter(x => x.kind === "own")) +
+    codes.map(c => sec(c ? `🎯 Competitors · ${flag(c)} ${cname(c)}` : "🎯 Competitors · country not detected yet", comps.filter(x => (x.country || "") === c))).join("") ||
+    '<tr><td colspan="7" class="mute">No domains yet. Add your store and your competitors above.</td></tr>';
+  fillCountryFilters();
 
   for (const sel of ["#fDomain", "#rDomain"]) {
     const cur = $(sel).value;
@@ -268,6 +315,12 @@ $("#domRows").onclick = async e => {
   }
 };
 $("#domRows").onchange = async e => {
+  const cs = e.target.closest("[data-act=country]");
+  if (cs) {
+    const { error } = await sb.from("domains").update({ country: cs.value || null, country_source: cs.value ? "manual" : null }).eq("id", cs.dataset.id);
+    if (error) return toast(error.message);
+    toast("Country saved"); return loadDomains();
+  }
   const b = e.target.closest("[data-act=toggle]"); if (!b) return;
   const { error } = await sb.from("domains").update({ is_active: b.checked }).eq("id", b.dataset.id);
   if (error) toast(error.message);
@@ -277,7 +330,7 @@ function parseDomains(txt) {
   return txt.split(/[\s,;]+/).map(s => s.trim().toLowerCase().replace(/^https?:\/\//, "").split("/")[0].replace(/^www\./, "")).filter(s => s.includes("."));
 }
 function renderStaged() {
-  $("#staged").innerHTML = staged.map((s, i) => `<span class="chip ${s.kind}">${s.kind === "own" ? "🏪" : "🎯"} ${esc(s.domain)}${s.ids.length ? ` <span class="mute small">(page ${esc(s.ids.join(","))})</span>` : ""}<button type="button" data-rm="${i}" title="Remove">×</button></span>`).join("");
+  $("#staged").innerHTML = staged.map((s, i) => `<span class="chip ${s.kind}">${s.kind === "own" ? "🏪" : "🎯"} ${esc(s.domain)}${s.country ? " " + flag(s.country) : ""}${s.ids.length ? ` <span class="mute small">(page ${esc(s.ids.join(","))})</span>` : ""}<button type="button" data-rm="${i}" title="Remove">×</button></span>`).join("");
   $("#startBtn").classList.toggle("hide", !staged.length);
   $("#startBtn").textContent = `Start tracking all (${staged.length})`;
 }
@@ -285,7 +338,7 @@ function stage() {
   const names = parseDomains($("#dName").value);
   if (!names.length) return toast("Enter a valid domain like competitor.com");
   const ids = $("#dPage").value.split(",").map(s => s.trim().replace(/\D/g, "")).filter(Boolean);
-  names.forEach(n => { if (!staged.some(s => s.domain === n)) staged.push({ domain: n, kind: $("#dKind").value, ids: names.length === 1 ? ids : [] }); });
+  names.forEach(n => { if (!staged.some(s => s.domain === n)) staged.push({ domain: n, kind: $("#dKind").value, country: $("#dCountry").value, ids: names.length === 1 ? ids : [] }); });
   $("#dName").value = ""; $("#dPage").value = ""; renderStaged(); $("#dName").focus();
 }
 $("#stageBtn").onclick = stage;
@@ -295,12 +348,105 @@ $("#addForm").onsubmit = async e => {
   e.preventDefault();
   if ($("#dName").value.trim()) stage();
   if (!staged.length) return toast("Add at least one domain first");
-  const rows = staged.map(s => ({ domain: s.domain, kind: s.kind, manual_page_ids: s.ids }));
+  const rows = staged.map(s => ({ domain: s.domain, kind: s.kind, manual_page_ids: s.ids, ...(s.country ? { country: s.country, country_source: "manual" } : {}) }));
   const { error } = await sb.from("domains").upsert(rows, { onConflict: "domain", ignoreDuplicates: true });
   if (error) return toast(error.message);
   toast(`${rows.length} domain(s) added. Tracking starts automatically within about 10 minutes.`);
   staged.length = 0; renderStaged(); loadDomains();
 };
+
+/* ---------- deep research ---------- */
+const RESEARCH_COUNTRIES = ["PK", "IN", "AE", "BD", "LK", "NP", "SA", "GB", "US", "CA", "AU"];
+$("#resCountry").innerHTML = RESEARCH_COUNTRIES.map(k => `<option value="${k}">${flag(k)} ${cname(k)}</option>`).join("") + '<option value="ALL">🌐 All countries</option>';
+function suggestCountry(text) {
+  const t = text.toLowerCase();
+  if (/[\u0600-\u06FF]/.test(text)) return ["PK", "Urdu script"];
+  if (/[\u0900-\u097F]/.test(text)) return ["IN", "Hindi script"];
+  if (/\b(pakistan|pk|karachi|lahore|islamabad|rs\.?|cod|wala|wali|nahi|aur)\b/.test(t)) return ["PK", "Pakistan wording"];
+  if (/\b(india|indian|delhi|mumbai|bangalore|rupees|₹|hain|bhaiya)\b/.test(t) || /₹/.test(text)) return ["IN", "India wording"];
+  if (/\b(dubai|uae|abu dhabi)\b/.test(t)) return ["AE", "UAE wording"];
+  return null;
+}
+$("#resKeywords").oninput = () => {
+  const g = suggestCountry($("#resKeywords").value);
+  $("#resSuggest").innerHTML = g ? `Suggestion: <b>${flag(g[0])} ${cname(g[0])}</b> (${g[1]}) <a href="#" id="applySug" data-c="${g[0]}">use it</a>` : "Pick the market where you want to search.";
+};
+$("#resSuggest").onclick = e => { const a = e.target.closest("#applySug"); if (a) { e.preventDefault(); $("#resCountry").value = a.dataset.c; } };
+$("#resForm").onsubmit = async e => {
+  e.preventDefault();
+  const kws = [...new Set($("#resKeywords").value.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean))].slice(0, 20);
+  if (!kws.length) return toast("Enter at least one keyword");
+  const { error } = await sb.from("research_jobs").insert({ keywords: kws, country: $("#resCountry").value });
+  if (error) return toast(error.message);
+  $("#resKeywords").value = ""; $("#resSuggest").textContent = "";
+  toast("Research queued. It starts within about 10 minutes."); loadResearch();
+};
+let resTimer = null, openJobs = new Set();
+async function loadResearch() {
+  clearTimeout(resTimer);
+  const [{ data: jobs, error }, { data: res }] = await Promise.all([
+    sb.from("research_jobs").select("*").order("created_at", { ascending: false }).limit(30),
+    sb.from("research_results").select("*").limit(5000)
+  ]);
+  if (error) return toast(error.message);
+  const by = {}; (res || []).forEach(r => (by[r.job_id] ||= []).push(r));
+  const badge = { pending: "b-warn", running: "b-info", done: "b-active", failed: "b-inactive" };
+  $("#resJobs").innerHTML = (jobs || []).map(j => {
+    const rows = (by[j.id] || []).sort((a, b) => b.active_ads - a.active_ads || b.total_ads - a.total_ads);
+    const table = rows.length ? `
+      <div style="overflow:auto"><table>
+        <thead><tr><th></th><th>Store</th><th>Website</th><th>Active ads</th><th>Total ads</th><th>Ads per keyword (active / total)</th><th>Sample</th><th></th></tr></thead>
+        <tbody>${rows.map(r => `<tr>
+          <td>${r.approved ? "" : `<input type="checkbox" data-pick="${r.id}">`}</td>
+          <td><b>${esc(r.page_name || r.page_id)}</b><br><a class="small" target="_blank" rel="noopener" href="https://www.facebook.com/ads/library/?active_status=all&ad_type=all&country=${esc(j.country)}&view_all_page_id=${esc(r.page_id)}">all their ads</a></td>
+          <td>${r.approved ? esc(r.domain || "—") : `<input class="dom" data-dom="${r.id}" value="${esc(r.domain || "")}" placeholder="store.com">`}</td>
+          <td><b>${r.active_ads}</b></td><td>${r.total_ads}</td>
+          <td>${Object.entries(r.per_keyword || {}).map(([k, v]) => `<div class="kwrow">${esc(k)}: <b>${v.active}</b> / ${v.total}${v.capped ? " (list capped)" : ""}</div>`).join("")}</td>
+          <td class="small">${r.sample_url ? `<a target="_blank" rel="noopener" href="${esc(safeUrl(r.sample_url))}">view ad</a><div class="copy" style="max-width:260px">${esc(r.sample_copy || "")}</div>` : ""}</td>
+          <td>${r.approved ? '<span class="badge b-active">in Domains</span>' : `<button class="btn small" data-approve="${r.id}">Approve</button>`}</td></tr>`).join("")}</tbody>
+      </table></div>
+      <div class="row" style="margin-top:10px"><button class="btn pri small" data-approve-sel="${j.id}">Approve selected as competitors</button><span class="mute small">${rows.length} stores found</span></div>` : "";
+    const msg = j.status === "failed" ? `<p class="err small">${esc(j.error || "failed")}</p>` : (j.status === "pending" || j.status === "running") ? '<p class="mute small">Waiting for the scraper... this page refreshes by itself.</p>' : (rows.length ? "" : '<p class="mute small">No stores found.</p>');
+    return `<details class="card job" data-job="${j.id}" ${(openJobs.has(j.id) || j.status !== "done" || jobs[0].id === j.id) ? "open" : ""}>
+      <summary><span class="badge ${badge[j.status] || "b-info"}">${j.status}</span><span>${flag(j.country)} ${esc(j.country === "ALL" ? "All countries" : cname(j.country))}</span>
+        <span>${j.keywords.map(k => `<span class="kwchip">${esc(k)}</span>`).join("")}</span>
+        <span class="mute small">${fmtDate(j.created_at)}</span>
+        <button class="btn danger small" data-deljob="${j.id}" style="margin-left:auto">Delete</button></summary>
+      ${msg}${table}</details>`;
+  }).join("") || '<p class="mute">No research yet. Add keywords above.</p>';
+  if ((jobs || []).some(j => j.status === "pending" || j.status === "running")) resTimer = setTimeout(() => { if (!$("#tab-research").classList.contains("hide")) loadResearch(); }, 15000);
+}
+async function approveRows(ids) {
+  const { data: rows } = await sb.from("research_results").select("*").in("id", ids);
+  const { data: jobs } = await sb.from("research_jobs").select("id,country").in("id", [...new Set((rows || []).map(r => r.job_id))]);
+  const jc = Object.fromEntries((jobs || []).map(j => [j.id, j.country]));
+  let ok = 0, skipped = 0;
+  for (const r of rows || []) {
+    const typed = document.querySelector(`[data-dom="${r.id}"]`);
+    const dom = parseDomains(typed ? typed.value : (r.domain || ""))[0];
+    if (!dom) { skipped++; continue; }
+    const c = jc[r.job_id];
+    const row = { domain: dom, kind: "competitor", manual_page_ids: [r.page_id], ...(c && c !== "ALL" ? { country: c, country_source: "research" } : {}) };
+    const { error } = await sb.from("domains").upsert(row, { onConflict: "domain", ignoreDuplicates: true });
+    if (error) { toast(error.message); continue; }
+    await sb.from("research_results").update({ approved: true, domain: dom }).eq("id", r.id);
+    ok++;
+  }
+  toast(`${ok} store(s) moved to Domains${skipped ? `, ${skipped} skipped (type the store website first)` : ""}. Tracking starts within about 10 minutes.`);
+  loadResearch(); loadDomains();
+}
+$("#resJobs").onclick = async e => {
+  const d = e.target.closest("[data-deljob]");
+  if (d) { e.preventDefault(); if (!confirm("Delete this research and its results?")) return; await sb.from("research_jobs").delete().eq("id", d.dataset.deljob); return loadResearch(); }
+  const a = e.target.closest("[data-approve]"); if (a) return approveRows([a.dataset.approve]);
+  const s = e.target.closest("[data-approve-sel]");
+  if (s) {
+    const ids = [...s.closest("details").querySelectorAll("[data-pick]:checked")].map(x => x.dataset.pick);
+    if (!ids.length) return toast("Tick the stores you want first");
+    approveRows(ids);
+  }
+};
+$("#resJobs").addEventListener("toggle", e => { const j = e.target.dataset && e.target.dataset.job; if (j) e.target.open ? openJobs.add(j) : openJobs.delete(j); }, true);
 
 /* ---------- ads ---------- */
 function adQuery() {
@@ -309,6 +455,7 @@ function adQuery() {
   if ($("#fStatus").value) q = q.eq("status", $("#fStatus").value);
   if ($("#fFormat").value) q = q.eq("display_format", $("#fFormat").value);
   if ($("#fKind").value) q = q.eq("kind", $("#fKind").value);
+  if ($("#fCountry").value) q = q.eq("country", $("#fCountry").value);
   const s = $("#fSearch").value.trim().replace(/[%,()]/g, " ");
   if (s) q = q.or(`ad_copy.ilike.%${s}%,title.ilike.%${s}%`);
   const [col, dir, nulls] = $("#fSort").value.split(".");
@@ -327,7 +474,7 @@ function renderAds() {
   $("#adRows").innerHTML = adsCache.map(a => `
     <tr class="click" data-id="${esc(a.ad_archive_id)}">
       <td>${a.image_url ? `<img class="thumb" loading="lazy" referrerpolicy="no-referrer" src="${esc(safeUrl(a.image_url))}" alt="">` : '<div class="thumb"></div>'}</td>
-      <td><b>${esc(a.domain)}</b> <span class="badge ${a.kind === "own" ? "b-own" : "b-comp"}">${a.kind === "own" ? "my store" : "competitor"}</span><br><span class="mute small">${esc(a.page_name || "")}</span></td>
+      <td><b>${esc(a.domain)}</b> ${a.country ? `<span title="${esc(cname(a.country))}">${flag(a.country)}</span>` : ""} <span class="badge ${a.kind === "own" ? "b-own" : "b-comp"}">${a.kind === "own" ? "my store" : "competitor"}</span><br><span class="mute small">${esc(a.page_name || "")}</span></td>
       <td><span class="badge ${a.status === "active" ? "b-active" : "b-inactive"}">${a.status === "active" ? "Active" : "Stopped"}</span>
           ${a.transcript_status === "done" ? '<br><span class="badge b-info" style="margin-top:4px">transcribed</span>' : ""}</td>
       <td>${fmtDate(a.start_date || a.first_seen)}</td>
@@ -353,7 +500,7 @@ async function loadStats() {
     ["Longest active", longest + " days"], ["Domains tracked", domains.filter(d => d.is_active).length]
   ].map(([k, v]) => `<div class="stat"><span class="mute small">${k}</span><b>${v}</b></div>`).join("");
 }
-["#fDomain", "#fKind", "#fStatus", "#fFormat", "#fSort"].forEach(s => $(s).onchange = () => loadAds(true));
+["#fDomain", "#fKind", "#fCountry", "#fStatus", "#fFormat", "#fSort"].forEach(s => $(s).onchange = () => loadAds(true));
 let st; $("#fSearch").oninput = () => { clearTimeout(st); st = setTimeout(() => loadAds(true), 350); };
 $("#reload").onclick = () => { loadDomains(); loadAds(true); };
 $("#more").onclick = () => { page++; loadAds(false); };
@@ -451,7 +598,7 @@ async function loadCompare() {
   const by = {};
   (ads || []).forEach(a => (by[a.domain_id] ||= []).push(a));
   const row = (label, s, cls) => `<tr class="${cls || ""}"><td><b>${label}</b></td><td>${s.active}</td><td>${s.avg.toFixed(1)} d</td><td>${s.max} d</td><td>${s.long}</td><td>${s.video}%</td><td>${s.fresh}</td><td>${s.stopped}</td></tr>`;
-  const own = domains.filter(d => d.kind === "own"), comp = domains.filter(d => d.kind !== "own");
+  const own = domains.filter(d => d.kind === "own"), comp = domains.filter(d => d.kind !== "own" && (!$("#cCountry").value || d.country === $("#cCountry").value));
   const so = stat(own.flatMap(d => by[d.id] || [])), sc = stat(comp.flatMap(d => by[d.id] || []));
   const n = comp.length || 1;
   $("#cmpSummary").innerHTML = [
