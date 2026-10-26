@@ -1,7 +1,7 @@
 name: Scrape new domains
 
-# Every ~10 minutes: look for domains you just added (never scraped yet).
-# If there are none this finishes in a few seconds and does nothing else.
+# Every ~10 minutes: fills in store countries, then looks for new domains / deep-research
+# requests. If nothing is waiting this finishes in seconds and does nothing else.
 on:
   schedule:
     - cron: "*/10 * * * *"
@@ -22,14 +22,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Any new domains waiting?
+      - name: Detect store countries + check what is waiting
         id: check
         working-directory: scraper
         run: |
           pip install -q requests
+          python detect_countries.py || true
           python scrape.py --pending --count
+          python research.py --count
       - name: Install browser
-        if: steps.check.outputs.pending != '0'
+        if: steps.check.outputs.pending != '0' || steps.check.outputs.research != '0'
         run: |
           pip install -q -r scraper/requirements.txt
           python -m playwright install --with-deps chromium
@@ -37,8 +39,12 @@ jobs:
         if: steps.check.outputs.pending != '0'
         working-directory: scraper
         run: python scrape.py --pending
+      - name: Deep research requests
+        if: steps.check.outputs.research != '0'
+        working-directory: scraper
+        run: python research.py
       - name: Keep debug screenshots (only if something was blocked)
-        if: always() && steps.check.outputs.pending != '0'
+        if: always() && (steps.check.outputs.pending != '0' || steps.check.outputs.research != '0')
         uses: actions/upload-artifact@v4
         with:
           name: debug-new
