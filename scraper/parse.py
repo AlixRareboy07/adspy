@@ -137,6 +137,10 @@ def to_record(ad: dict) -> dict:
         *(c.get("video_hd_url") for c in cards),
         *(c.get("video_sd_url") for c in cards),
     )
+    video_sd_url = _first(
+        *(v.get("video_sd_url") for v in videos),
+        *(c.get("video_sd_url") for c in cards),
+    )
     image_url = _first(
         *(i.get("resized_image_url") or i.get("original_image_url") for i in images),
         *(v.get("video_preview_image_url") for v in videos),
@@ -163,6 +167,7 @@ def to_record(ad: dict) -> dict:
         "link_url": link_url,
         "display_format": fmt,
         "video_url": video_url,
+        "video_sd_url": video_sd_url,
         "image_url": image_url,
         "platforms": [str(p) for p in plat],
         "collation_count": ad.get("collation_count"),
