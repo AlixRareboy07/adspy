@@ -2,7 +2,7 @@ name: Transcribe ads
 
 on:
   schedule:
-    - cron: "7 * * * *"
+    - cron: "7 * * * *"          # hourly check; does real work only if you pressed "Transcribe"
   workflow_dispatch:
 
 concurrency: transcribe
@@ -34,6 +34,12 @@ jobs:
       - name: Install Whisper
         if: steps.check.outputs.pending != '0'
         run: pip install -q -r scraper/requirements-transcribe.txt
+      - name: Install ffmpeg
+        if: steps.check.outputs.pending != '0'
+        run: |
+          pip install -q imageio-ffmpeg
+          sudo ln -sf "$(python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" /usr/local/bin/ffmpeg
+          ffmpeg -version | head -1
       - name: Transcribe
         if: steps.check.outputs.pending != '0'
         working-directory: scraper
