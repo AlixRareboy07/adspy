@@ -63,6 +63,7 @@
   .kwrow{font-size:12px;color:#cfd3de;white-space:nowrap}
   input.dom{width:170px}
   @media(max-width:700px){.copy{max-width:220px} main{padding:10px}}
+details.dl{margin:8px 0}details.dl summary{display:inline-block;cursor:pointer;list-style:none}details.dl summary::-webkit-details-marker{display:none}.dlmenu{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 </style>
 </head>
 <body>
@@ -169,7 +170,7 @@
           <button class="btn pri" type="submit">Start research</button>
         </div>
       </form>
-      <p class="mute small">Research starts automatically within about 10 minutes and takes a few minutes per keyword. Tick the stores you want and press Approve: they move to Domains under Competitors, with the country of this research.</p>
+      <p class="mute small">Research starts automatically on the next scheduled run (usually within an hour or two) and takes a few minutes per keyword. Tick the stores you want and press Approve: they move to Domains under Competitors, with the country of this research.</p>
       <div id="resJobs"></div>
     </section>
 
@@ -186,7 +187,7 @@
         <div id="staged" style="margin-top:12px"></div>
         <button class="btn pri hide" id="startBtn" type="submit">Start tracking all</button>
       </form>
-      <p class="mute small">The scraper finds the Facebook page automatically from the website. If it cannot, paste the Page ID above (Facebook page → About → Page transparency → Page ID). New domains start being scraped automatically within about 10 minutes of pressing Start tracking.</p>
+      <p class="mute small">The scraper finds the Facebook page automatically from the website. If it cannot, paste the Page ID above (Facebook page → About → Page transparency → Page ID). New domains start being scraped automatically on the next scheduled run (usually within an hour or two) after you press Start tracking.</p>
       <div class="card" style="padding:0;overflow:auto">
         <table>
           <thead><tr><th>Domain</th><th>Country</th><th>Facebook page(s)</th><th>Ads</th><th>Last scraped</th><th>Tracking</th><th></th></tr></thead>
@@ -512,6 +513,7 @@ async function openAd(id) {
   if (error) return toast(error.message);
   renderSheet(data); $("#modal").classList.add("show");
 }
+const LANGS = { ur: "Urdu", hi: "Urdu", en: "English", pa: "Punjabi", ar: "Arabic", sd: "Sindhi" };
 function renderSheet(a) {
   const ts = a.transcript_status;
   const canVideo = !!a.video_url;
@@ -535,19 +537,25 @@ function renderSheet(a) {
         <a target="_blank" rel="noopener" href="${esc(a.library_url)}">Ad Library ↗</a>
         ${safeUrl(a.video_url) ? ` · <a target="_blank" rel="noopener" href="${esc(a.video_url)}">Video file ↗</a>` : ""}</div>
     </div>
-    ${canVideo ? `<video controls preload="none" poster="${esc(safeUrl(a.image_url))}" src="${esc(safeUrl(a.video_url))}"></video>`
+    ${canVideo ? `<video controls controlsList="nodownload noplaybackrate" disablePictureInPicture preload="none" poster="${esc(safeUrl(a.image_url))}" src="${esc(safeUrl(a.video_url))}"></video>
+      <details class="dl"><summary class="btn small">⋮ Download video</summary>
+        <div class="dlmenu">
+          <button class="btn small" data-dl="hd">⬇ ${a.video_sd_url && a.video_sd_url !== a.video_url ? "HD — best quality" : "Best quality available"}</button>
+          ${a.video_sd_url && a.video_sd_url !== a.video_url ? `<button class="btn small" data-dl="sd">⬇ SD — smaller file</button>` : ""}
+        </div></details>`
       : a.image_url ? `<img style="max-width:100%;max-height:360px;border-radius:10px" referrerpolicy="no-referrer" src="${esc(safeUrl(a.image_url))}" alt="">` : ""}
     <h3>Ad copy</h3><div class="pre">${esc(a.ad_copy || "—")}</div>
     <div class="row" style="margin-top:6px"><button class="btn small" data-copy="copy">Copy ad text</button></div>
 
     <h3>Video script (voice → text)</h3>
     ${ts === "done" ? `
-      <p class="mute small">Detected language: <b>${esc(a.transcript_lang || "?")}</b></p>
+      <p class="mute small">Spoken language: <b>${esc(LANGS[a.transcript_lang] || a.transcript_lang || "?")}</b></p>
       <b>English</b><div class="pre">${esc(a.transcript_en || "")}</div>
-      ${a.transcript_lang !== "en" ? `<br><b>Original (${esc(a.transcript_lang)})</b><div class="pre">${esc(a.transcript_original || "")}</div>` : ""}
-      <div class="row" style="margin-top:8px"><button class="btn small" data-copy="en">Copy English script</button></div>`
+      ${a.transcript_lang !== "en" ? `<br><b>${a.transcript_lang === "ur" || a.transcript_lang === "hi" ? "Urdu (as spoken, in Roman letters)" : "Original (" + esc(LANGS[a.transcript_lang] || a.transcript_lang) + ")"}</b><div class="pre">${esc(a.transcript_original || "")}</div>` : ""}
+      <div class="row" style="margin-top:8px"><button class="btn small" data-copy="en">Copy English script</button>
+        ${a.transcript_lang !== "en" ? `<button class="btn small" data-copy="orig">Copy Urdu script</button>` : ""}</div>`
     : ts === "requested" || ts === "processing" ? `<p><span class="badge b-warn">${ts === "requested" ? "Queued" : "Transcribing…"}</span>
-        <span class="mute small"> The worker runs about once an hour. This box updates by itself.</span></p>`
+        <span class="mute small"> Videos are transcribed automatically (a few minutes each, in order). This box updates by itself.</span></p>`
     : !canVideo ? `<p class="mute">This is not a video ad, so there is no spoken script.</p>`
     : `${ts === "failed" ? `<p class="err small">Last attempt failed: ${esc(a.transcript_error || "")}</p>` : ""}
        <button class="btn pri" id="txBtn">🎙 Transcribe this ad</button>`}
@@ -560,7 +568,18 @@ function renderSheet(a) {
     toast("Queued for transcription"); a.transcript_status = "requested"; renderSheet(a); poll(a.ad_archive_id);
   };
   $("#sheet").querySelectorAll("[data-copy]").forEach(b => b.onclick = () => {
-    navigator.clipboard.writeText(b.dataset.copy === "en" ? a.transcript_en : a.ad_copy || ""); toast("Copied");
+    navigator.clipboard.writeText(b.dataset.copy === "en" ? a.transcript_en : b.dataset.copy === "orig" ? a.transcript_original : a.ad_copy || ""); toast("Copied");
+  });
+  $("#sheet").querySelectorAll("[data-dl]").forEach(b => b.onclick = async () => {
+    const url = safeUrl(b.dataset.dl === "sd" && a.video_sd_url ? a.video_sd_url : a.video_url);
+    const name = `${a.domain}-${a.ad_archive_id}-${b.dataset.dl}.mp4`;
+    try {
+      toast("Downloading…");
+      const r = await fetch(url); if (!r.ok) throw new Error(r.status);
+      const u = URL.createObjectURL(await r.blob());
+      const l = document.createElement("a"); l.href = u; l.download = name; document.body.appendChild(l); l.click(); l.remove();
+      setTimeout(() => URL.revokeObjectURL(u), 60000);
+    } catch (e) { window.open(url, "_blank", "noopener"); toast("Opened the video file — use Save as…"); }
   });
   if (ts === "requested" || ts === "processing") poll(a.ad_archive_id);
 }
