@@ -10,7 +10,7 @@ concurrency: transcribe
 jobs:
   transcribe:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 58
     env:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
@@ -30,7 +30,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: whisper-small-v1
+          key: whisper-medium-v1
       - name: Install Whisper
         if: steps.check.outputs.pending != '0'
         run: pip install -q -r scraper/requirements-transcribe.txt
