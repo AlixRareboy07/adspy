@@ -12,15 +12,19 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import wave
 from pathlib import Path
 
 import requests
 
 import db
+from roman import to_roman
 
-MODEL_SIZE = os.environ.get("WHISPER_MODEL", "small")   # tiny / base / small / medium
-BATCH = int(os.environ.get("TRANSCRIBE_BATCH", "10"))
+MODEL_SIZE = os.environ.get("WHISPER_MODEL", "medium")   # tiny / base / small / medium
+BATCH = int(os.environ.get("TRANSCRIBE_BATCH", "5"))
+BUDGET_MIN = int(os.environ.get("TRANSCRIBE_MINUTES", "40"))   # keep working through the queue this long
+HINDUSTANI = ("ur", "hi")          # Urdu and Hindi are the same spoken language; Whisper picks either
 MAX_BYTES = 120 * 1024 * 1024
 
 
@@ -65,47 +69,66 @@ def main() -> int:
                 f.write(f"pending={n}\n")
         return 0
 
-    todo = waiting()
-    if not todo:
+    if not waiting():
         print("Nothing to transcribe.")
         return 0
 
+    # a run that was cancelled or timed out can leave ads stuck in "processing"; only one worker runs at a time
+    db.patch("ads", {"transcript_status": "processing"}, {"transcript_status": "requested"})
+
     from faster_whisper import WhisperModel
     model = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8")
+    opts = dict(vad_filter=True, beam_size=5, temperature=0.0, condition_on_previous_text=False)
+    deadline = time.time() + BUDGET_MIN * 60
 
-    for ad in todo:
-        aid = ad["ad_archive_id"]
-        print("transcribing", aid, flush=True)
-        db.patch("ads", {"ad_archive_id": aid}, {"transcript_status": "processing", "transcript_error": None})
-        try:
-            if not ad.get("video_url"):
-                raise RuntimeError("This ad has no video (image/text ad), so there is no spoken script to transcribe.")
-            with tempfile.TemporaryDirectory() as tmp:
-                vid, wav = Path(tmp, "v.mp4"), Path(tmp, "a.wav")
-                try:
-                    download(ad["video_url"], vid)
-                except Exception as e:
-                    raise RuntimeError(f"Video link expired or blocked ({e}). It refreshes on the next scrape - "
-                                       "press Transcribe again after that.")
-                to_wav(vid, wav)
-                audio = load_wav(wav)
-                segs, info = model.transcribe(audio, task="transcribe", vad_filter=True)
-                original = " ".join(s.text.strip() for s in segs).strip()
-                lang = info.language
-                if lang == "en":
-                    english = original
-                else:
-                    segs2, _ = model.transcribe(audio, task="translate", vad_filter=True)
-                    english = " ".join(s.text.strip() for s in segs2).strip()
-            if not original:
-                raise RuntimeError("No speech detected in this video (music only?).")
-            db.patch("ads", {"ad_archive_id": aid}, {
-                "transcript_status": "done", "transcript_lang": lang,
-                "transcript_original": original, "transcript_en": english, "transcript_error": None})
-        except Exception as e:
-            db.patch("ads", {"ad_archive_id": aid}, {"transcript_status": "failed",
-                                                     "transcript_error": str(e)[:400]})
-            print("  failed:", e, flush=True)
+    while time.time() < deadline:
+        todo = waiting()
+        if not todo:
+            break
+        for ad in todo:
+            aid = ad["ad_archive_id"]
+            print("transcribing", aid, flush=True)
+            db.patch("ads", {"ad_archive_id": aid}, {"transcript_status": "processing", "transcript_error": None})
+            try:
+                if not ad.get("video_url"):
+                    raise RuntimeError("This ad has no video (image/text ad), so there is no spoken script to transcribe.")
+                with tempfile.TemporaryDirectory() as tmp:
+                    vid, wav = Path(tmp, "v.mp4"), Path(tmp, "a.wav")
+                    try:
+                        download(ad["video_url"], vid)
+                    except Exception as e:
+                        raise RuntimeError(f"Video link expired or blocked ({e}). It refreshes on the next scrape - "
+                                           "it will be transcribed automatically after that.")
+                    to_wav(vid, wav)
+                    audio = load_wav(wav)
+                    segs, info = model.transcribe(audio, task="transcribe", **opts)
+                    heard = " ".join(s.text.strip() for s in segs).strip()
+                    lang = info.language
+                    if lang in HINDUSTANI:
+                        if lang == "ur":     # Whisper's Hindi mode is more accurate for this speech; we write it in Roman
+                            segs, _ = model.transcribe(audio, task="transcribe", language="hi", **opts)
+                            heard = " ".join(s.text.strip() for s in segs).strip()
+                        original = to_roman(heard)
+                        lang = "ur"
+                        segs2, _ = model.transcribe(audio, task="translate", language="hi", **opts)
+                        english = " ".join(s.text.strip() for s in segs2).strip()
+                    elif lang == "en":
+                        original = english = heard
+                    else:
+                        original = heard
+                        segs2, _ = model.transcribe(audio, task="translate", language=lang, **opts)
+                        english = " ".join(s.text.strip() for s in segs2).strip()
+                if not original:
+                    raise RuntimeError("No speech detected in this video (music only?).")
+                db.patch("ads", {"ad_archive_id": aid}, {
+                    "transcript_status": "done", "transcript_lang": lang,
+                    "transcript_original": original, "transcript_en": english, "transcript_error": None})
+            except Exception as e:
+                db.patch("ads", {"ad_archive_id": aid}, {"transcript_status": "failed",
+                                                         "transcript_error": str(e)[:400]})
+                print("  failed:", e, flush=True)
+            if time.time() >= deadline:
+                break
     return 0
 
 
