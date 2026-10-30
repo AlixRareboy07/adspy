@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import wave
 from pathlib import Path
 
 import requests
@@ -43,6 +44,15 @@ def download(url: str, dest: Path) -> None:
 def to_wav(src: Path, dst: Path) -> None:
     subprocess.run(["ffmpeg", "-y", "-i", str(src), "-vn", "-ac", "1", "-ar", "16000", str(dst)],
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def load_wav(path: Path):
+    """Read the 16 kHz mono wav that ffmpeg made into a float array, so faster-whisper does not
+    need to decode audio itself (its decoder breaks on some PyAV versions)."""
+    import numpy as np
+    with wave.open(str(path), "rb") as w:
+        raw = w.readframes(w.getnframes())
+    return np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
 
 def main() -> int:
@@ -78,13 +88,14 @@ def main() -> int:
                     raise RuntimeError(f"Video link expired or blocked ({e}). It refreshes on the next scrape - "
                                        "press Transcribe again after that.")
                 to_wav(vid, wav)
-                segs, info = model.transcribe(str(wav), task="transcribe", vad_filter=True)
+                audio = load_wav(wav)
+                segs, info = model.transcribe(audio, task="transcribe", vad_filter=True)
                 original = " ".join(s.text.strip() for s in segs).strip()
                 lang = info.language
                 if lang == "en":
                     english = original
                 else:
-                    segs2, _ = model.transcribe(str(wav), task="translate", vad_filter=True)
+                    segs2, _ = model.transcribe(audio, task="translate", vad_filter=True)
                     english = " ".join(s.text.strip() for s in segs2).strip()
             if not original:
                 raise RuntimeError("No speech detected in this video (music only?).")
